@@ -46,7 +46,7 @@ TARGET = example
 
 # List C source files here. (C dependencies are automatically generated.)
 SRC =	$(TARGET).c \
-	usb_serial.c \
+	usb_mouse.c \
 	sampling.c 
 
 
@@ -563,9 +563,11 @@ $(OBJDIR)/%.o : %.cpp
 	$(CC) -S $(ALL_CFLAGS) $< -o $@
 
 
+
 # Compile: create assembler files from C++ source files.
 %.s : %.cpp
 	$(CC) -S $(ALL_CPPFLAGS) $< -o $@
+
 
 
 # Assemble: create object files from assembler source files.
@@ -573,6 +575,7 @@ $(OBJDIR)/%.o : %.S
 	@echo
 	@echo $(MSG_ASSEMBLING) $<
 	$(CC) -c $(ALL_ASFLAGS) $< -o $@
+
 
 
 # Create preprocessed source for use in sending a bug report.
@@ -601,12 +604,15 @@ clean_list :
 	$(REMOVEDIR) .dep
 
 
+
 # Create object files directory
 $(shell mkdir $(OBJDIR) 2>/dev/null)
 
 
+
 # Include the dependency files.
 -include $(shell mkdir .dep 2>/dev/null) $(wildcard .dep/*)
+
 
 
 # Listing of phony targets.
