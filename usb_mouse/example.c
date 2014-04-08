@@ -24,9 +24,9 @@
 #include <avr/io.h>
 #include <avr/pgmspace.h>
 #include <util/delay.h>
-//#include "usb_mouse.h"
+#include "usb_mouse.h"
 
-#include "usb_serial.h"
+//#include "usb_serial.h"
 #include "sampling.h"
 
 #define LED_CONFIG	(DDRD |= (1<<6))
@@ -64,13 +64,23 @@ unsigned int click_left;
 unsigned int click_right;
 
 unsigned long max;
+unsigned long min;
+unsigned int min_found;
+unsigned long first_peak;
+unsigned long second_peak;
+
+unsigned long count;
+unsigned long right_click_flag;
+unsigned long first_min;
+unsigned short get_first_min;
+unsigned short single_right;
 
 unsigned short  left_click_pressed;
 unsigned short  left_click_released;
 
 unsigned short right_click_released;
 unsigned short right_click_pressed;
-int flag;
+int baseReached; // 0 - false, 1 - true
 
 void movement_end_check(void)   
 {
@@ -159,6 +169,14 @@ void position(void)
 	char buf1[4];
 	count2=0;
 	
+	count = count - 1;
+	
+	if(count == 0){
+		count = 50;
+		single_right = 1;
+		right_click_flag = 1;
+	}
+	
 	// Set right click to 0 everytime, unless we detect a 1
 	click_right = 0;	
 		
@@ -175,7 +193,7 @@ void position(void)
     accelerationx[1]= accelerationx[1]>>6;          // division by 64
     accelerationy[1]= accelerationy[1]>>6;
 	
-	_delay_ms(10);
+	_delay_ms(5);
 	
 	count2=0;
 	
@@ -184,13 +202,13 @@ void position(void)
 		adc_start(ADC_MUX_PIN_F7, ADC_REF_POWER);
 		left_click[1] = left_click[1] + adc_read();
 		
-		adc_start(ADC_MUX_PIN_F6, ADC_REF_POWER); // 64 sums of the clicks sample  
+		adc_start(ADC_MUX_PIN_F6, ADC_REF_POWER); // 512 sums of the clicks sample  
 		right_click[1] = right_click[1] + adc_read();
 		count2++;                                       
-    }while (count2!=0x080); 
+    }while (count2!=0x0100); 
 		
-	left_click[1] = left_click[1] >> 8; // ideally needs to be 7, but 8 works better
-	right_click[1] = right_click[1] >> 8;
+	left_click[1] = left_click[1] >> 9; // ideally needs to be 7, but 8 works better
+	right_click[1] = right_click[1] >> 9;
 	
 	if (accelerationx[1] <= valX + ACC_ERROR_SENSITIVITY
 		&& accelerationx[1] >= valX - ACC_ERROR_SENSITIVITY){
@@ -275,6 +293,49 @@ void position(void)
 	positionX[0] = positionX[1];          //actual position data must be sent to the  
     positionY[0] = positionY[1];      //previous position
 	
+	if((left_click[0] < left_click[1]) && (click_left == 1) && get_first_min){
+		first_min = min;
+		get_first_min = 0;
+	}
+	
+	
+	
+	if(left_click[1] < 25){
+		baseReached = 1;
+		max = 0;
+		if(click_left == 0){
+			min = 500;
+		}
+	}
+	
+	// if(min_found){
+		// max = min;
+	// }
+	
+	if((left_click[0] < left_click[1]) && (click_left == 1)){
+	
+		if((first_peak > 0) && (left_click[1] > (0.65*((first_peak + first_min)/ 2))) && (click_left == 1)){
+			click_left = 0;
+			first_peak = 0;
+			baseReached = 0;
+			second_peak = left_click[1];
+			// usb_serial_putchar('L');
+			// usb_serial_putchar('e');
+			// usb_serial_putchar('f');
+			// usb_serial_putchar('t');
+			// usb_serial_putchar(' ');
+			// usb_serial_putchar('R');
+			// usb_serial_putchar('e');
+			// usb_serial_putchar('l');
+			// usb_serial_putchar('e');
+			// usb_serial_putchar('a');
+			// usb_serial_putchar('s');
+			// usb_serial_putchar('e');
+			// usb_serial_putchar('\n');
+		}
+	
+	}
+	
 	/*  |       Press Event          _  <-- Release Event
 	    |        |                 /   \
 		|        v               /       \  
@@ -291,43 +352,38 @@ void position(void)
 		Then we wait for the Release event. Release Event is defined as current left click value becoming less than Max for the second time
 		Once Release Event is reached, we release the click button by resetting click_left to 0.
 	*/	
-	if(left_click[1] > max){
+	if(left_click[1] >= max){
 		max = left_click[1];
-		flag = 1;
+		
+		if(left_click[0] == min){
+			max = min;
+		}
+		
 	}
 	else{
-		if((max >= MAX_LOW) && (click_left == 0)){
-			click_left = 1;
-			usb_serial_putchar('L');
-			usb_serial_putchar('e');
-			usb_serial_putchar('f');
-			usb_serial_putchar('t');
-			usb_serial_putchar(' ');
-			usb_serial_putchar('P');
-			usb_serial_putchar('r');
-			usb_serial_putchar('e');
-			usb_serial_putchar('s');
-			usb_serial_putchar('s');
-			usb_serial_putchar('!');
-			usb_serial_putchar('\n');
-			_delay_ms(40);
-			flag = 0;
+		if(left_click[1] < min){
+			min = left_click[1];
+			//min_found = 1;
 		}
-		if((max > MAX_LOW) && (click_left == 1) && (flag == 1)){
-			click_left = 0;
-			usb_serial_putchar('L');
-			usb_serial_putchar('e');
-			usb_serial_putchar('f');
-			usb_serial_putchar('t');
-			usb_serial_putchar(' ');
-			usb_serial_putchar('R');
-			usb_serial_putchar('e');
-			usb_serial_putchar('l');
-			usb_serial_putchar('e');
-			usb_serial_putchar('a');
-			usb_serial_putchar('s');
-			usb_serial_putchar('e');
-			usb_serial_putchar('\n');
+		if((max >= MAX_LOW) && (click_left == 0) && baseReached && right_click_flag){	
+			if(right_click[1] < 55){
+				first_peak = max;
+				get_first_min = 1;
+				min = 500;
+				click_left = 1;
+				// usb_serial_putchar('L');
+				// usb_serial_putchar('e');
+				// usb_serial_putchar('f');
+				// usb_serial_putchar('t');
+				// usb_serial_putchar(' ');
+				// usb_serial_putchar('P');
+				// usb_serial_putchar('r');
+				// usb_serial_putchar('e');
+				// usb_serial_putchar('s');
+				// usb_serial_putchar('s');
+				// usb_serial_putchar('!');
+				// usb_serial_putchar('\n');
+			}			
 		}
 	}
 	
@@ -336,121 +392,161 @@ void position(void)
 	right_click[0] = right_click[1];
    
     //To make it work!
-	if(right_click[1] < 120){
-		if((right_click[1] > 60) && (right_click[1] < 90)){
+	if(click_left == 0){
+		if((right_click[1] > 30) && (right_click[1] < 200) && (single_right == 1)){
 			click_right = 1;
-			usb_serial_putchar('R');
-			usb_serial_putchar('i');
-			usb_serial_putchar('g');
-			usb_serial_putchar('h');
-			usb_serial_putchar('t');
-			usb_serial_putchar(' ');
-			usb_serial_putchar('B');
-			usb_serial_putchar('i');
-			usb_serial_putchar('t');
-			usb_serial_putchar('c');
-			usb_serial_putchar('h');
-			usb_serial_putchar('e');
-			usb_serial_putchar('s');
-			usb_serial_putchar('!');
-			usb_serial_putchar('\n');
+			count = 50;
+			right_click_flag = 0;
+			single_right = 0;
+			// usb_serial_putchar('R');
+			// usb_serial_putchar('i');
+			// usb_serial_putchar('g');
+			// usb_serial_putchar('h');
+			// usb_serial_putchar('t');
+			// usb_serial_putchar(' ');
+			// usb_serial_putchar('B');
+			// usb_serial_putchar('i');
+			// usb_serial_putchar('t');
+			// usb_serial_putchar('c');
+			// usb_serial_putchar('h');
+			// usb_serial_putchar('e');
+			// usb_serial_putchar('s');
+			// usb_serial_putchar('!');
+			// usb_serial_putchar('\n');
 		}					
 	}
     	
-	usb_serial_putchar('G');
-	usb_serial_putchar('x');
-	usb_serial_putchar(' ');
-	print(valX);
-	usb_serial_putchar(' ');
+	// usb_serial_putchar('G');
+	// usb_serial_putchar('x');
+	// usb_serial_putchar(' ');
+	// print(valX);
+	// usb_serial_putchar(' ');
 
-	usb_serial_putchar(' ');
-	usb_serial_putchar('G');
-	usb_serial_putchar('y');
-	usb_serial_putchar(' ');
-	print(valY);		
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('G');
+	// usb_serial_putchar('y');
+	// usb_serial_putchar(' ');
+	// print(valY);		
+	// usb_serial_putchar(' ');
 
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
 
-	usb_serial_putchar(' ');
-	usb_serial_putchar('A');
-	usb_serial_putchar('x');
-	usb_serial_putchar(' ');
-	print(accelerationx[1]);
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('A');
+	// usb_serial_putchar('x');
+	// usb_serial_putchar(' ');
+	// print(accelerationx[1]);
+	// usb_serial_putchar(' ');
 
-	usb_serial_putchar(' ');
-	usb_serial_putchar('A');
-	usb_serial_putchar('y');
-	usb_serial_putchar(' ');
-	print(accelerationy[1]);
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('A');
+	// usb_serial_putchar('y');
+	// usb_serial_putchar(' ');
+	// print(accelerationy[1]);
+	// usb_serial_putchar(' ');
 
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
 
-	usb_serial_putchar(' ');
-	usb_serial_putchar('V');
-	usb_serial_putchar('x');
-	usb_serial_putchar(' ');
-	print(velocityx[1]);
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('V');
+	// usb_serial_putchar('x');
+	// usb_serial_putchar(' ');
+	// print(velocityx[1]);
+	// usb_serial_putchar(' ');
 
-	usb_serial_putchar(' ');
-	usb_serial_putchar('V');
-	usb_serial_putchar('y');
-	usb_serial_putchar(' ');
-	print(velocityy[1]);
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('V');
+	// usb_serial_putchar('y');
+	// usb_serial_putchar(' ');
+	// print(velocityy[1]);
+	// usb_serial_putchar(' ');
 
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
 
 
-	usb_serial_putchar(' ');
-	usb_serial_putchar('X');
-	usb_serial_putchar(' ');
-	print(positionX[1]);
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('X');
+	// usb_serial_putchar(' ');
+	// print(positionX[1]);
+	// usb_serial_putchar(' ');
 
-	usb_serial_putchar(' ');
-	usb_serial_putchar('Y');
-	usb_serial_putchar(' ');
-	print(positionY[1]);
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('Y');
+	// usb_serial_putchar(' ');
+	// print(positionY[1]);
+	// usb_serial_putchar(' ');
 
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
 
-	usb_serial_putchar(' ');
-	usb_serial_putchar('D');
-	usb_serial_putchar('x');
-	usb_serial_putchar(' ');
-	print(deltaX);
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('D');
+	// usb_serial_putchar('x');
+	// usb_serial_putchar(' ');
+	// print(deltaX);
+	// usb_serial_putchar(' ');
 	
-	usb_serial_putchar(' ');
-	usb_serial_putchar('D');
-	usb_serial_putchar('y');
-	usb_serial_putchar(' ');
-	print(deltaY);
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('D');
+	// usb_serial_putchar('y');
+	// usb_serial_putchar(' ');
+	// print(deltaY);
+	// usb_serial_putchar(' ');
 	
-	usb_serial_putchar(' ');
-	usb_serial_putchar('l');
-	usb_serial_putchar('c');
-	usb_serial_putchar(' ');
-	print(left_click[1]);
-	usb_serial_putchar(' ');
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('l');
+	// usb_serial_putchar('c');
+	// usb_serial_putchar(' ');
+	// print(left_click[1]);
+	// usb_serial_putchar(' ');
 		
-	usb_serial_putchar(' ');
-	usb_serial_putchar('r');
-	usb_serial_putchar('c');
-	usb_serial_putchar(' ');
-	print(right_click[1]);
-	usb_serial_putchar(' ');	
-		
-	usb_serial_putchar('\n');
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('r');
+	// usb_serial_putchar('c');
+	// usb_serial_putchar(' ');
+	// print(right_click[1]);
+	// usb_serial_putchar(' ');
+
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('M');
+	// usb_serial_putchar('x');
+	// usb_serial_putchar(' ');
+	// print(max);
+	// usb_serial_putchar(' ');
 	
-	// usb_mouse_move(deltaY,deltaX,0); // Move the mouse- changed X to Y, Y to X to accomodate change in pins
-	// usb_mouse_buttons(click_left,0,click_right);
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('M');
+	// usb_serial_putchar('n');
+	// usb_serial_putchar(' ');
+	// print(min);
+	// usb_serial_putchar(' ');
+
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('F');
+	// usb_serial_putchar('P');
+	// usb_serial_putchar(' ');
+	// print(first_peak);
+	// usb_serial_putchar(' ');		
+	
+	// usb_serial_putchar(' ');
+	// usb_serial_putchar('F');
+	// usb_serial_putchar('M');
+	// usb_serial_putchar('n');
+	// usb_serial_putchar(' ');
+	// print(first_min);
+	// usb_serial_putchar('\n');
+	
+	
+	usb_mouse_buttons(click_left,0,0);
+	usb_mouse_move(deltaY,deltaX,0); 
+	
+	// if(click_left == 1){
+		// usb_mouse_move(0,0,0);
+	// }
+	// else{
+		// usb_mouse_move(deltaY,deltaX,0); // Move the mouse- changed X to Y, Y to X to accomodate change in pins
+	// }
+	
+	
 //	_delay_ms(10);
  
 //  movement_end_check();
@@ -462,9 +558,16 @@ void position(void)
 
 int main(void)
 {	
+	count = 0;
 	click_left = 0;
-	flag = 0;
 	max = 0;
+	min = 500;
+	first_peak = 0;
+	second_peak = 0;
+	baseReached = 1;
+	right_click_flag = 1;
+	single_right = 1;
+	get_first_min = 1;
 	
 	CPU_PRESCALE(CPU_125kHz);
 	_delay_ms(1);		// allow slow power supply startup
@@ -502,7 +605,8 @@ int main(void)
 	click_right = 0;
 
 	max = 0;
-
+	min_found = 0;
+	
 	left_click_pressed = 0;
 	left_click_released = 0;
 
